@@ -1,0 +1,225 @@
+rules_version = '2';
+
+// MySOS Firestore Security Rules
+//
+// Collections:
+//   users/{uid}   - profile of every account (role: 'user' | 'caregiver')
+//                   Server-managed fields (client cannot change):
+//                   caregiverUids, caringUids, lineUserId, sosLastAlertAt
+//   pairs/{code}  - short-lived 6-digit pairing codes
+//   alerts/{id}   - SOS alerts, caregiverUids snapshot denormalized for access control
+//   links/{id}    - user<->caregiver links (server-only, written by Cloud Functions)
+//
+// Note: Cloud Functions use the Admin SDK and bypass these rules.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isSelf(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    // ---------------- users ----------------
+    match /users/{uid} {
+      // Own profile, or a caregiver reading the profile of someone they care for.
+      allow get: if isSelf(uid)
+        || (signedIn()
+            && uid in get(/databases/$(database)/documents/users/$(request.auth.uid)).data.caringUids);
+
+      // List is only allowed for relationship queries ("users linked to me").
+      // The rule is evaluated against every document the query could return,
+      // so arbitrary listing is impossible: any doc without a link to the
+      // caller makes the query fail.
+      allow list: if signedIn()
+        && (request.auth.uid in resource.data.caringUids
+            || request.auth.uid in resource.data.caregiverUids);
+
+      function userFields() {
+        return ['role', 'displayName', 'phone', 'fcmTokens', 'caregiverUids',
+                'caringUids', 'lineUserId', 'lineLinkCode', 'lineLinkExpiresAt',
+                'createdAt', 'lastActiveAt'];
+      }
+
+      // Server-managed fields must never be created or changed by clients.
+      function protectsManagedFields(data) {
+        return (!('lineUserId' in data))
+          && data.caregiverUids == []
+          && data.caringUids == [];
+      }
+
+      function validProfileShape(data) {
+        return data.role in ['user', 'caregiver']
+          && data.displayName is string
+          && data.displayName.size() > 0
+          && data.displayName.size() <= 60
+          && (!('phone' in data) || (data.phone is string && data.phone.size() <= 20))
+          && (!('fcmTokens' in data) || (data.fcmTokens is list && data.fcmTokens.size() <= 10))
+          && (!('createdAt' in data) || data.createdAt is number)
+          && (!('lastActiveAt' in data) || data.lastActiveAt is number)
+          && (!('lineLinkCode' in data) || (data.lineLinkCode is string && data.lineLinkCode.matches('^[0-9]{6}$')))
+          && (!('lineLinkExpiresAt' in data) || (data.lineLinkExpiresAt is number && data.lineLinkExpiresAt > request.time.toMillis() && data.lineLinkExpiresAt <= request.time.toMillis() + 660000));
+      }
+
+      allow create: if isSelf(uid)
+        && request.resource.data.keys().hasOnly(userFields())
+        && protectsManagedFields(request.resource.data)
+        && validProfileShape(request.resource.data);
+
+      allow update: if isSelf(uid)
+        && request.resource.data.keys().hasOnly(userFields())
+        && request.resource.data.role == resource.data.role
+        && request.resource.data.caregiverUids == resource.data.caregiverUids
+        && request.resource.data.caringUids == resource.data.caringUids
+        && request.resource.data.lineUserId == resource.data.lineUserId
+        && validProfileShape(request.resource.data);
+
+      allow delete: if false;
+    }
+
+    // ---------------- pairs ----------------
+    match /pairs/{code} {
+      // Only the two parties involved in this code may read it.
+      allow get: if signedIn()
+        && (resource.data.ownerUid == request.auth.uid
+            || resource.data.acceptedBy == request.auth.uid);
+      allow list: if false;
+
+      // Owner (role 'user') generates a fresh pairing code.
+      allow create: if signedIn()
+        && code.matches('^[0-9]{6}$')
+        && request.resource.data.keys().hasOnly(['ownerUid', 'role', 'status', 'createdAt', 'expiresAt', 'acceptedBy'])
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.role == 'user'
+        && request.resource.data.status == 'pending'
+        && !('acceptedBy' in request.resource.data)
+        && request.resource.data.createdAt is number
+        && request.resource.data.expiresAt is number
+        && request.resource.data.expiresAt > request.time.toMillis()
+        && request.resource.data.expiresAt <= request.time.toMillis() + 660000; // max 11 minutes
+
+      // A caregiver claims the code exactly once, while still pending and unexpired.
+      allow update: if signedIn()
+        && resource.data.status == 'pending'
+        && resource.data.expiresAt > request.time.toMillis()
+        && !('acceptedBy' in resource.data)
+        && resource.data.ownerUid != request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['acceptedBy'])
+        && request.resource.data.acceptedBy == request.auth.uid;
+
+      allow delete: if signedIn()
+        && resource.data.ownerUid == request.auth.uid
+        && resource.data.status in ['pending', 'cancelled'];
+    }
+
+    // ---------------- alerts ----------------
+    match /alerts/{alertId} {
+      function isOwnerOf(data) {
+        return signedIn() && data.userId == request.auth.uid;
+      }
+
+      function isCaregiverOf(data) {
+        return signedIn() && request.auth.uid in data.caregiverUids;
+      }
+
+      allow get: if isOwnerOf(resource.data) || isCaregiverOf(resource.data);
+
+      // Queries must be scoped to owner or array-contains caregiver uid.
+      allow list: if signedIn()
+        && (resource.data.userId == request.auth.uid
+            || request.auth.uid in resource.data.caregiverUids);
+
+      // The SOS owner creates their own alert; caregiverUids must be an
+      // honest snapshot of the owner's current caregiver list.
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['userId', 'userName', 'status', 'source', 'ts', 'location', 'caregiverUids'])
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.userName is string
+        && request.resource.data.userName.size() <= 60
+        && request.resource.data.status == 'active'
+        && request.resource.data.source in ['app', 'widget']
+        && request.resource.data.ts is number
+        && request.resource.data.caregiverUids is list
+        && request.resource.data.caregiverUids == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.caregiverUids
+        && (!('location' in request.resource.data)
+            || (request.resource.data.location.keys().hasOnly(['lat', 'lng'])
+                && request.resource.data.location.lat is number
+                && request.resource.data.location.lng is number
+                && request.resource.data.location.lat >= -90
+                && request.resource.data.location.lat <= 90
+                && request.resource.data.location.lng >= -180
+                && request.resource.data.location.lng <= 180));
+
+      // Acknowledge (caregiver) or cancel (owner) — no other edits by clients.
+      allow update: if resource.data.status == 'active'
+        && ((isCaregiverOf(resource.data)
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'ackBy', 'ackByName', 'ackAt'])
+              && request.resource.data.status == 'acked'
+              && request.resource.data.ackBy == request.auth.uid
+              && request.resource.data.ackByName is string
+              && request.resource.data.ackByName.size() <= 60
+              && request.resource.data.ackAt is number)
+          || (isOwnerOf(resource.data)
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+              && request.resource.data.status == 'cancelled'));
+
+      allow delete: if false;
+    }
+
+    // ---------------- links (server-only) ----------------
+    match /links/{linkId} {
+      allow read, write: if false;
+    }
+
+    // ---------------- trips (pre-existing app on this Firebase project) ----------------
+    // Preserved verbatim from the previous ruleset deployed on chayen-2 so the
+    // existing trips app keeps working. Do not modify.
+    function tripsHasOnlyAllowedFields(data, fields) {
+      return data.keys().hasOnly(fields);
+    }
+
+    function tripsIsString(field, minLen, maxLen) {
+      return field is string && field.size() >= minLen && field.size() <= maxLen;
+    }
+
+    function tripsIsValidTrip(data) {
+      return tripsHasOnlyAllowedFields(data, ['name', 'startDate', 'endDate', 'location', 'coverImage', 'coverImagePath', 'days', 'status', 'updatedAt', 'joinCode', 'ownerId', 'members']) &&
+        tripsIsString(data.name, 0, 200) &&
+        data.startDate is string &&
+        data.endDate is string &&
+        data.location is string &&
+        data.coverImage is string &&
+        (!('coverImagePath' in data) || data.coverImagePath is string) &&
+        (!('status' in data) || (data.status is string && data.status.size() < 20)) &&
+        (!('joinCode' in data) || (data.joinCode is string && data.joinCode.size() >= 4 && data.joinCode.size() <= 12)) &&
+        (!('ownerId' in data) || data.ownerId is string) &&
+        (!('members' in data) || (data.members is list && data.members.size() <= 50)) &&
+        data.days is list && data.days.size() <= 30;
+    }
+
+    function tripsIsValidTripUpdate(data) {
+      return tripsHasOnlyAllowedFields(data, ['name', 'startDate', 'endDate', 'location', 'coverImage', 'coverImagePath', 'days', 'status', 'updatedAt', 'joinCode', 'ownerId', 'members']) &&
+        (!('name' in data) || tripsIsString(data.name, 0, 200)) &&
+        (!('startDate' in data) || data.startDate is string) &&
+        (!('endDate' in data) || data.endDate is string) &&
+        (!('location' in data) || data.location is string) &&
+        (!('coverImage' in data) || data.coverImage is string) &&
+        (!('coverImagePath' in data) || data.coverImagePath is string) &&
+        (!('status' in data) || (data.status is string && data.status.size() < 20)) &&
+        (!('joinCode' in data) || (data.joinCode is string && data.joinCode.size() >= 4 && data.joinCode.size() <= 12)) &&
+        (!('ownerId' in data) || data.ownerId is string) &&
+        (!('members' in data) || (data.members is list && data.members.size() <= 50)) &&
+        (!('days' in data) || (data.days is list && data.days.size() <= 30));
+    }
+
+    match /trips/{tripId} {
+      allow read: if true;
+      allow create: if tripsIsValidTrip(request.resource.data);
+      allow update: if tripsIsValidTripUpdate(request.resource.data);
+      allow delete: if true;
+    }
+  }
+}

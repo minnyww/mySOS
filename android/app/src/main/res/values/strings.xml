@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="sos_widget_label">SOS</string>
+    <string name="sos_widget_hint">กดขอความช่วยเหลือ</string>
+    <string name="sos_widget_description">ปุ่มลัดขอความช่วยเหลือฉุกเฉิน MySOS — กดแล้วส่งแจ้งเตือนถึงผู้ดูแลทันที</string>
+</resources>
