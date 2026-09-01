@@ -201,3 +201,4 @@ cd functions && npm run build   # ตรวจ TypeScript
 - [ ] เสียงแจ้งเตือนดังเป็นพิเศษ + Critical Alert (iOS) / full-screen intent (Android 14+)
 - [ ] ปุ่มเรียก 1669 ฉุกเฉินทางการแพทย์โดยตรง
 - [ ] ตรวจ "ผู้ใช้ไม่ได้ขยับนาน" (check-in รายวัน) แจ้งผู้ดูแลเมื่อไม่มีการตอบ
+# mySOS
