@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../config.dart';
 import '../models.dart';
@@ -47,8 +48,9 @@ class _SosScreenState extends ConsumerState<SosScreen> {
   }
 
   void _cancel() {
+    // PopScope blocks maybePop during the countdown, so route home directly.
     _timer?.cancel();
-    Navigator.of(context).maybePop();
+    context.go('/user');
   }
 
   Future<void> _fire() async {
@@ -183,7 +185,17 @@ class _SentView extends ConsumerWidget {
           OutlinedButton.icon(
             icon: const Icon(Icons.close),
             label: const Text('ยกเลิกการขอความช่วยเหลือ'),
-            onPressed: () => ref.read(alertServiceProvider).cancelAlert(alertId),
+            onPressed: () async {
+              try {
+                await ref.read(alertServiceProvider).cancelAlert(alertId);
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('ยกเลิกไม่สำเร็จ: $e')),
+                  );
+                }
+              }
+            },
           ),
         const SizedBox(height: 12),
         TextButton(

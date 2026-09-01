@@ -36,7 +36,7 @@ final routerProvider = Provider<GoRouter>((ref) {
   ref.listen(userProfileProvider, (_, __) => refresh.ping());
   ref.listen(notificationTapProvider, (_, __) => refresh.ping());
 
-  return GoRouter(
+  final router = GoRouter(
     navigatorKey: rootNavigatorKey,
     refreshListenable: refresh,
     initialLocation: '/splash',
@@ -157,6 +157,17 @@ final routerProvider = Provider<GoRouter>((ref) {
       );
     },
   );
+
+  // Navigate directly on notification taps instead of relying solely on the
+  // redirect — if guards aren't ready yet the redirect parks on /splash, and
+  // the still-set tap state carries the navigation once the user resolves.
+  ref.listen<String?>(notificationTapProvider, (_, next) {
+    if (next != null && next.isNotEmpty) {
+      router.go('/alerts/$next');
+    }
+  });
+
+  return router;
 });
 
 class MyApp extends ConsumerStatefulWidget {
@@ -166,16 +177,25 @@ class MyApp extends ConsumerStatefulWidget {
   ConsumerState<MyApp> createState() => _MyAppState();
 }
 
-class _MyAppState extends ConsumerState<MyApp> {
+class _MyAppState extends ConsumerState<MyApp> with WidgetsBindingObserver {
   bool _fcmSetupDone = false;
+  String? _lastUid;
 
   @override
   void initState() {
     super.initState();
-    // Register for push as soon as we know who we are.
+    WidgetsBinding.instance.addObserver(this);
+    // Register for push as soon as we know who we are. The latch resets when
+    // the profile disappears (e.g. doc deleted and re-created during setup),
+    // so a fresh profile always re-registers its FCM token.
     ref.listenManual(userProfileProvider, (prev, next) {
       final profile = next.valueOrNull;
-      if (profile != null && profile.role != null && !_fcmSetupDone) {
+      if (profile == null || profile.role == null) {
+        _fcmSetupDone = false;
+        return;
+      }
+      _lastUid = profile.uid;
+      if (!_fcmSetupDone) {
         _fcmSetupDone = true;
         setupFcm(
           uid: profile.uid,
@@ -185,6 +205,21 @@ class _MyAppState extends ConsumerState<MyApp> {
         );
       }
     }, fireImmediately: true);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Idempotent re-registration — heals tokens lost to earlier rules
+    // rejections or profile re-creation.
+    if (state == AppLifecycleState.resumed && _lastUid != null) {
+      registerFcmToken(_lastUid!);
+    }
   }
 
   @override

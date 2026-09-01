@@ -1,8 +1,31 @@
 import 'db.dart';
+import 'dart:math' as math;
+
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 
 import '../models.dart';
 import 'location_service.dart';
+
+/// Re-subscribes [factory] forever with backoff when the stream errors out,
+/// so a listener that died (network blip, transient permission error) heals
+/// instead of leaving the UI stuck on stale data.
+Stream<T> _resilient<T>(Stream<T> Function() factory) async* {
+  var attempts = 0;
+  while (true) {
+    try {
+      await for (final value in factory()) {
+        attempts = 0;
+        yield value;
+      }
+    } catch (e) {
+      attempts++;
+      debugPrint('[alert] listener dropped, retry #$attempts: $e');
+    }
+    await Future<void>.delayed(
+        Duration(seconds: math.min(2 * attempts, 15)));
+  }
+}
 
 /// Creates SOS alerts and provides live streams of alert state/history.
 class AlertService {
@@ -43,27 +66,38 @@ class AlertService {
 
   /// Live state of a single alert (delivery status, acks, cancellation).
   Stream<AlertRecord> watchAlert(String alertId) {
-    return _alerts.doc(alertId).snapshots().map(AlertRecord.fromSnapshot);
+    return _resilient(() =>
+        _alerts.doc(alertId).snapshots().map(AlertRecord.fromSnapshot));
   }
 
-  /// Most recent alerts created by [uid].
+  /// Most recent alerts created by [uid] — last 3 days, max [limit] items.
   Stream<List<AlertRecord>> watchUserAlerts(String uid, {int limit = 20}) {
-    return _alerts
-        .where('userId', isEqualTo: uid)
-        .orderBy('ts', descending: true)
-        .limit(limit)
-        .snapshots()
-        .map((s) => s.docs.map(AlertRecord.fromSnapshot).toList());
+    return _resilient(() {
+      final cutoff =
+          DateTime.now().subtract(const Duration(days: 3)).millisecondsSinceEpoch;
+      return _alerts
+          .where('userId', isEqualTo: uid)
+          .where('ts', isGreaterThan: cutoff)
+          .orderBy('ts', descending: true)
+          .limit(limit)
+          .snapshots()
+          .map((s) => s.docs.map(AlertRecord.fromSnapshot).toList());
+    });
   }
 
-  /// Alerts involving any user this caregiver cares for.
+  /// Alerts involving any user this caregiver cares for — last 3 days.
   Stream<List<AlertRecord>> watchCaregiverAlerts(String caregiverUid, {int limit = 30}) {
-    return _alerts
-        .where('caregiverUids', arrayContains: caregiverUid)
-        .orderBy('ts', descending: true)
-        .limit(limit)
-        .snapshots()
-        .map((s) => s.docs.map(AlertRecord.fromSnapshot).toList());
+    return _resilient(() {
+      final cutoff =
+          DateTime.now().subtract(const Duration(days: 3)).millisecondsSinceEpoch;
+      return _alerts
+          .where('caregiverUids', arrayContains: caregiverUid)
+          .where('ts', isGreaterThan: cutoff)
+          .orderBy('ts', descending: true)
+          .limit(limit)
+          .snapshots()
+          .map((s) => s.docs.map(AlertRecord.fromSnapshot).toList());
+    });
   }
 
   Future<void> cancelAlert(String alertId) async {

@@ -41,7 +41,7 @@ service cloud.firestore {
       function userFields() {
         return ['role', 'displayName', 'phone', 'fcmTokens', 'caregiverUids',
                 'caringUids', 'lineUserId', 'lineLinkCode', 'lineLinkExpiresAt',
-                'createdAt', 'lastActiveAt'];
+                'createdAt', 'lastActiveAt', 'sosLastAlertAt'];
       }
 
       // Server-managed fields must never be created or changed by clients.
@@ -60,6 +60,7 @@ service cloud.firestore {
           && (!('fcmTokens' in data) || (data.fcmTokens is list && data.fcmTokens.size() <= 10))
           && (!('createdAt' in data) || data.createdAt is number)
           && (!('lastActiveAt' in data) || data.lastActiveAt is number)
+          && (!('sosLastAlertAt' in data) || data.sosLastAlertAt is timestamp)
           && (!('lineLinkCode' in data) || (data.lineLinkCode is string && data.lineLinkCode.matches('^[0-9]{6}$')))
           && (!('lineLinkExpiresAt' in data) || (data.lineLinkExpiresAt is number && data.lineLinkExpiresAt > request.time.toMillis() && data.lineLinkExpiresAt <= request.time.toMillis() + 660000));
       }
@@ -74,7 +75,14 @@ service cloud.firestore {
         && request.resource.data.role == resource.data.role
         && request.resource.data.caregiverUids == resource.data.caregiverUids
         && request.resource.data.caringUids == resource.data.caringUids
-        && request.resource.data.lineUserId == resource.data.lineUserId
+        // Comparing a field missing from both docs errors out in rules (deny),
+        // so guard existence first — and keep clients from adding it.
+        && (('lineUserId' in resource.data)
+            ? request.resource.data.lineUserId == resource.data.lineUserId
+            : !('lineUserId' in request.resource.data))
+        // Server-managed rate-limit timestamp, written only by Cloud Functions.
+        && (!('sosLastAlertAt' in resource.data)
+            || request.resource.data.sosLastAlertAt == resource.data.sosLastAlertAt)
         && validProfileShape(request.resource.data);
 
       allow delete: if false;
@@ -154,7 +162,9 @@ service cloud.firestore {
                 && request.resource.data.location.lng <= 180));
 
       // Acknowledge (caregiver) or cancel (owner) — no other edits by clients.
-      allow update: if resource.data.status == 'active'
+      // Owner may also cancel a rate-limited / no-caregivers alert (the status
+      // can flip server-side between render and press).
+      allow update: if resource.data.status in ['active', 'rate_limited', 'no_caregivers']
         && ((isCaregiverOf(resource.data)
               && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'ackBy', 'ackByName', 'ackAt'])
               && request.resource.data.status == 'acked'

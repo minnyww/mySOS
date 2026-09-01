@@ -22,6 +22,21 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _saving = false;
   String? _lineCode;
   bool _generatingCode = false;
+  bool _diagRunning = false;
+  List<String>? _diagLines;
+
+  Future<void> _runFcmDiagnostics() async {
+    final uid = ref.read(authUidProvider).valueOrNull;
+    if (uid == null) return;
+    setState(() => _diagRunning = true);
+    final lines = await diagnoseFcm(uid);
+    if (mounted) {
+      setState(() {
+        _diagLines = lines;
+        _diagRunning = false;
+      });
+    }
+  }
 
   @override
   void dispose() {
@@ -187,6 +202,35 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             label: const Text('ทดสอบเสียง/แจ้งเตือนบนเครื่องนี้'),
             onPressed: () => showTestNotification(),
           ),
+          const SizedBox(height: 8),
+          FilledButton.tonalIcon(
+            icon: _diagRunning
+                ? const SizedBox(
+                    height: 20, width: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.health_and_safety),
+            label: const Text('ตรวจสอบการแจ้งเตือน (วินิจฉัย)'),
+            onPressed: _diagRunning ? null : _runFcmDiagnostics,
+          ),
+          if (_diagLines != null) ...[
+            const SizedBox(height: 8),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: _diagLines!
+                      .map((l) => Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 2),
+                            child: Text(l,
+                                style: const TextStyle(
+                                    fontSize: 14, height: 1.4)),
+                          ))
+                      .toList(),
+                ),
+              ),
+            ),
+          ],
           const Divider(height: 40),
 
           // --- Widget hint ---------------------------------------------------

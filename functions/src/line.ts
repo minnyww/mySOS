@@ -35,29 +35,62 @@ export async function linePush(to: string, token: string, messages: unknown[]): 
   }
 }
 
+/** Details of one SOS alert, pre-formatted for display in messages. */
+export interface SosAlertInfo {
+  userName: string;
+  dateTimeText: string;
+  sourceText: string;
+  locationText: string | null;
+  mapUrl: string | null;
+  phone: string | null;
+}
+
 /** Buttons template for an SOS alert; falls back to plain text when no actions are available. */
-export function buildSosMessage(userName: string, timeText: string, mapUrl: string | null, phone: string | null): unknown {
+export function buildSosMessage(info: SosAlertInfo): unknown {
+  const { userName, dateTimeText, sourceText, locationText, mapUrl, phone } = info;
   const actions: LineAction[] = [];
   if (mapUrl) {
-    actions.push({ type: 'uri', label: 'ดูตำแหน่ง', uri: mapUrl });
+    actions.push({ type: 'uri', label: 'ดูตำแหน่งแผนที่', uri: mapUrl });
   }
   if (phone) {
     const label = `โทรหา ${userName}`.slice(0, 20);
     actions.push({ type: 'uri', label, uri: `tel:${phone}` });
   }
+
+  const altText =
+    `🚨 SOS จาก ${userName} เวลา ${dateTimeText} น. (จาก${sourceText})` +
+    (locationText ? ` พิกัด ${locationText}` : ' ไม่มีข้อมูลตำแหน่ง') +
+    ' — เปิดแอป MySOS เพื่อดูรายละเอียด';
+
   if (actions.length === 0) {
-    return {
-      type: 'text',
-      text: `🚨 SOS จาก ${userName} เวลา ${timeText} น. — เปิดแอป MySOS เพื่อดูรายละเอียด`,
-    };
+    const lines = [
+      '🚨 SOS ฉุกเฉิน',
+      `ผู้ขอความช่วยเหลือ: ${userName}`,
+      `🕐 เวลา: ${dateTimeText} น. (จาก${sourceText})`,
+      `📍 พิกัด: ${locationText ?? 'ไม่มีข้อมูลตำแหน่ง'}`,
+    ];
+    if (phone) lines.push(`📞 เบอร์ติดต่อ: ${phone}`);
+    lines.push('เปิดแอป MySOS เพื่อดูรายละเอียด');
+    return { type: 'text', text: lines.join('\n') };
   }
+
+  // Buttons template caps `text` at 60 characters (a title is present),
+  // so the detail block is truncated rather than risking a rejected push.
+  const text = [
+    `${userName} ขอความช่วยเหลือ`,
+    `🕐 ${dateTimeText} น. • ${sourceText}`,
+    `📍 ${locationText ?? 'ไม่มีข้อมูลตำแหน่ง'}`,
+  ]
+    .join('\n')
+    .slice(0, 60);
+
   return {
     type: 'template',
-    altText: `🚨 SOS จาก ${userName} เวลา ${timeText} น.`,
+    altText,
     template: {
       type: 'buttons',
-      title: '🚨 SOS',
-      text: `${userName} ขอความช่วยเหลือ\nเวลา ${timeText} น.`,
+      title: '🚨 SOS ฉุกเฉิน',
+      text,
       actions,
     },
   };

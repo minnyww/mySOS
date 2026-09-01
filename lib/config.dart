@@ -23,4 +23,14 @@ class AppConfig {
 
   /// Cooldown enforced server-side between two SOS alerts.
   static const Duration sosCooldown = Duration(seconds: 60);
+
+  /// How long after an SOS fires the owner's app keeps streaming live GPS.
+  /// Enforced again by Firestore rules on every write.
+  static const Duration liveLocationWindow = Duration(minutes: 10);
+
+  /// Minimum gap between live-location writes (battery vs freshness).
+  static const Duration liveLocationInterval = Duration(seconds: 10);
+
+  /// Trail points kept per alert; must stay within the rules' cap.
+  static const int liveLocationMaxPoints = 120;
 }

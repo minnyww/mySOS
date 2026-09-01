@@ -1,7 +1,7 @@
 name: mysos
 description: MySOS — แอปแจ้งเตือนขอความช่วยเหลือถึงผู้ดูแล (FCM + LINE + SMS)
 publish_to: 'none'
-version: 0.1.0+1
+version: 0.1.0+6
 
 environment:
   sdk: '>=3.4.0 <4.0.0'
@@ -21,12 +21,15 @@ dependencies:
   # App
   flutter_riverpod: ^2.6.1
   go_router: ^14.8.1
-  mobile_scanner: ^5.2.3
+  mobile_scanner: ^7.4.0
   qr_flutter: ^4.1.0
   geolocator: ^13.0.4
   url_launcher: ^6.3.2
   flutter_local_notifications: ^18.0.1
   shared_preferences: ^2.5.3
+  permission_handler: ^11.3.1
+  flutter_map: ^8.3.2
+  latlong2: ^0.10.1
 
 dev_dependencies:
   flutter_test:

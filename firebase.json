@@ -1,7 +1,13 @@
 {
   "firestore": {
     "rules": "firestore.rules",
-    "indexes": "firestore.indexes.json"
+    "indexes": "firestore.indexes.json",
+    "databases": {
+      "mysosdb": {
+        "rules": "firestore.rules",
+        "indexes": "firestore.indexes.json"
+      }
+    }
   },
   "functions": [
     {

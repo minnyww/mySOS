@@ -79,9 +79,23 @@ async function fanOutAlert(alertId: string, raw: admin.firestore.QueryDocumentSn
   }
 
   const userName = String(alert.userName ?? 'ผู้ใช้');
-  const timeText = new Date(ts).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+  const alertDate = new Date(ts);
+  const dateText = alertDate.toLocaleDateString('th-TH', { day: 'numeric', month: 'short' });
+  const timeText = alertDate.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+  const sourceText = alert.source === 'widget' ? 'วิดเจ็ตหน้าจอหลัก' : 'แอป MySOS';
   const location = alert.location as { lat: number; lng: number } | undefined;
   const mapUrl = location ? `https://maps.google.com/?q=${location.lat},${location.lng}` : null;
+  const locationText = location
+    ? `${location.lat.toFixed(5)}, ${location.lng.toFixed(5)}`
+    : null;
+  const alertInfo = {
+    userName,
+    dateTimeText: `${dateText} ${timeText}`,
+    sourceText,
+    locationText,
+    mapUrl,
+    phone: owner.phone ?? null,
+  };
 
   // ---- Channel 1: FCM push -------------------------------------------------
   try {
@@ -97,15 +111,26 @@ async function fanOutAlert(alertId: string, raw: admin.firestore.QueryDocumentSn
           userId: String(alert.userId ?? ''),
           userName,
           ts: String(ts),
+          source: String(alert.source ?? 'app'),
           ...(location ? { lat: String(location.lat), lng: String(location.lng) } : {}),
+          ...(owner.phone ? { phone: owner.phone } : {}),
         },
         notification: {
           title: `🚨 SOS จาก ${userName}`,
-          body: location ? 'แตะเพื่อดูตำแหน่งและติดต่อกลับ' : 'แตะเพื่อดูรายละเอียด',
+          body: [
+            `⏰ ${dateText} ${timeText} น. • จาก${sourceText}`,
+            locationText ? `📍 พิกัด ${locationText}` : '📍 ไม่มีข้อมูลตำแหน่ง',
+            locationText ? 'แตะเพื่อดูแผนที่และโทรกลับ' : 'แตะเพื่อดูรายละเอียดและติดต่อกลับ',
+          ].join('\n'),
         },
         android: {
           priority: 'high',
-          notification: { channelId: 'sos_alerts', priority: 'max', sound: 'default' },
+          notification: {
+            icon: 'ic_notification',
+            channelId: 'sos_alerts',
+            priority: 'max',
+            sound: 'default',
+          },
         },
         apns: {
           payload: { aps: { sound: 'default', interruptionLevel: 'time-sensitive' } },
@@ -143,7 +168,7 @@ async function fanOutAlert(alertId: string, raw: admin.firestore.QueryDocumentSn
     } else if (lineUsers.length === 0) {
       channels.line = { skipped: 'no-linked-line-accounts' };
     } else {
-      const message = buildSosMessage(userName, timeText, mapUrl, owner.phone ?? null);
+      const message = buildSosMessage(alertInfo);
       let sent = 0;
       const errors: string[] = [];
       for (const c of lineUsers) {
@@ -172,7 +197,7 @@ async function fanOutAlert(alertId: string, raw: admin.firestore.QueryDocumentSn
     } else if (targets.length === 0) {
       channels.sms = { skipped: 'no-valid-phone-numbers' };
     } else {
-      const body = buildSosSmsBody(userName, mapUrl);
+      const body = buildSosSmsBody(userName, timeText, mapUrl);
       let sent = 0;
       const errors: string[] = [];
       for (const t of targets) {
@@ -203,14 +228,28 @@ async function handleAlertUpdated(
     const ownerSnap = await db.collection('users').doc(String(a.userId)).get();
     const tokens = (ownerSnap.data() as UserData | undefined)?.fcmTokens ?? [];
     if (tokens.length === 0) return;
+    const ackAtText = new Date(toMillis(a.ackAt) || Date.now()).toLocaleTimeString('th-TH', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    const sentAtText = new Date(toMillis(a.ts) || Date.now()).toLocaleTimeString('th-TH', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
     await admin.messaging().sendEachForMulticast({
       tokens,
       notification: {
         title: '✅ ผู้ดูแลรับทราบแล้ว',
-        body: `${String(a.ackByName ?? 'ผู้ดูแล')} เห็น SOS ของคุณแล้ว`,
+        body: [
+          `${String(a.ackByName ?? 'ผู้ดูแล')} เห็น SOS ของคุณแล้ว`,
+          `ตอบรับเมื่อ ${ackAtText} น. (แจ้งเตือนเมื่อ ${sentAtText} น.)`,
+        ].join('\n'),
       },
       data: { type: 'ack', alertId },
-      android: { priority: 'high' },
+      android: {
+        priority: 'high',
+        notification: { icon: 'ic_notification', channelId: 'sos_alerts' },
+      },
     });
     return;
   }
@@ -224,13 +263,20 @@ async function handleAlertUpdated(
       if (t) tokens.push(...t);
     }
     if (tokens.length === 0) return;
+    const cancelTimeText = new Date().toLocaleTimeString('th-TH', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
     await admin.messaging().sendEachForMulticast({
       tokens,
       notification: {
         title: 'SOS ถูกยกเลิกแล้ว',
-        body: `${String(a.userName ?? 'ผู้ใช้')} ยกเลิกการขอความช่วยเหลือ`,
+        body: `${String(a.userName ?? 'ผู้ใช้')} ยกเลิกการขอความช่วยเหลือแล้ว เมื่อ ${cancelTimeText} น.`,
       },
       data: { type: 'alert_cancelled', alertId },
+      android: {
+        notification: { icon: 'ic_notification', channelId: 'sos_alerts' },
+      },
     });
   }
 }

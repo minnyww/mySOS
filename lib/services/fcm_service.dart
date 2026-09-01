@@ -35,8 +35,9 @@ Future<void> setupFcm({
     );
     debugPrint('[fcm] permission: ${settings.authorizationStatus}');
   } catch (e) {
+    // Permission can be unavailable on some devices, but the token still
+    // registers — keep going instead of skipping registration entirely.
     debugPrint('[fcm] requestPermission failed: $e');
-    return; // Without permission there is nothing more to do.
   }
 
   if (Platform.isAndroid) {
@@ -53,7 +54,7 @@ Future<void> setupFcm({
 
   await localNotifications.initialize(
     const InitializationSettings(
-      android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+      android: AndroidInitializationSettings('@drawable/ic_notification'),
       iOS: DarwinInitializationSettings(),
     ),
     onDidReceiveNotificationResponse: (response) {
@@ -63,6 +64,25 @@ Future<void> setupFcm({
       }
     },
   );
+
+  // Register tap handling FIRST — a cold start from a notification tap must
+  // surface the alert as fast as possible, before any slow network work.
+  FirebaseMessaging.onMessageOpenedApp.listen((message) {
+    final alertId = message.data['alertId'] as String?;
+    if (alertId != null && alertId.isNotEmpty && onTapAlert != null) {
+      onTapAlert(alertId);
+    }
+  });
+
+  {
+    final initial = await messaging.getInitialMessage();
+    if (initial != null) {
+      final alertId = initial.data['alertId'] as String?;
+      if (alertId != null && alertId.isNotEmpty && onTapAlert != null) {
+        onTapAlert(alertId);
+      }
+    }
+  }
 
   await _registerToken(messaging, uid);
   messaging.onTokenRefresh.listen((_) => _registerToken(messaging, uid));
@@ -96,17 +116,6 @@ Future<void> setupFcm({
       );
     }
   });
-
-  FirebaseMessaging.onMessageOpenedApp.listen((message) {
-    final alertId = message.data['alertId'] as String?;
-    if (alertId != null && onTapAlert != null) onTapAlert(alertId);
-  });
-
-  final initial = await messaging.getInitialMessage();
-  if (initial != null) {
-    final alertId = initial.data['alertId'] as String?;
-    if (alertId != null && onTapAlert != null) onTapAlert(alertId);
-  }
 }
 
 Future<void> _registerToken(FirebaseMessaging messaging, String uid) async {
@@ -120,6 +129,49 @@ Future<void> _registerToken(FirebaseMessaging messaging, String uid) async {
     // Expected to fail on the emulator suite (no FCM emulator) — ignore.
     debugPrint('[fcm] token registration skipped: $e');
   }
+}
+
+/// Re-register the FCM token for [uid] (idempotent arrayUnion). Safe to call
+/// on every app resume — covers tokens lost to profile re-creation or rules
+/// rejections during earlier sessions.
+Future<void> registerFcmToken(String uid) =>
+    _registerToken(FirebaseMessaging.instance, uid);
+
+/// Step-by-step notification diagnostics for the settings screen. Each line
+/// reports one stage so the failing step is visible on the device itself.
+Future<List<String>> diagnoseFcm(String uid) async {
+  final lines = <String>[];
+  final messaging = FirebaseMessaging.instance;
+
+  try {
+    final settings = await messaging.getNotificationSettings();
+    lines.add('สิทธิ์แจ้งเตือน: ${settings.authorizationStatus.name}');
+  } catch (e) {
+    lines.add('สิทธิ์แจ้งเตือน: อ่านไม่ได้ ($e)');
+  }
+
+  String? token;
+  try {
+    token = await messaging.getToken();
+    lines.add(token == null
+        ? 'FCM token: ไม่ได้รับจากอุปกรณ์ (Google Play Services อาจมีปัญหา)'
+        : 'FCM token: ได้รับแล้ว (${token.substring(0, 16)}…)');
+  } catch (e) {
+    lines.add('FCM token: ผิดพลาด ($e)');
+  }
+
+  if (token != null) {
+    try {
+      await mysosDb.collection('users').doc(uid).update({
+        'fcmTokens': FieldValue.arrayUnion([token]),
+      });
+      lines.add('บันทึก token ลงฐานข้อมูล: สำเร็จ');
+    } catch (e) {
+      lines.add('บันทึก token ลงฐานข้อมูล: ล้มเหลว ($e)');
+    }
+  }
+
+  return lines;
 }
 
 /// Deliver a local test notification (used by "ทดสอบเสียงแจ้งเตือน" in settings).

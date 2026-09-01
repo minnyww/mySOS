@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models.dart';
 import '../services/alert_service.dart';
 import '../services/bootstrap.dart';
+import '../services/live_tracking.dart';
 import '../services/pairing_service.dart';
 
 /// Injected from main() after awaiting bootstrap.
@@ -31,24 +32,32 @@ final userProfileProvider = StreamProvider<Profile?>((ref) {
 final alertServiceProvider = Provider<AlertService>((_) => AlertService());
 final pairingServiceProvider = Provider<PairingService>((_) => PairingService());
 
-/// Profiles of the caregivers linked to the signed-in user.
+/// App-lifetime owner of the live-location stream for the newest SOS.
+/// Not autoDispose: tracking must survive navigating away from the SOS screen.
+final liveTrackerProvider = Provider<LiveLocationTracker>(
+  (_) => LiveLocationTracker(),
+);
+
+/// Profiles of the caregivers linked to the signed-in user (role: user).
+/// A caregiver's profile lists this uid in their `caringUids`.
 final caregiversProvider = StreamProvider<List<Profile>>((ref) {
   final uid = ref.watch(authUidProvider).valueOrNull;
   if (uid == null) return Stream.value(const []);
   return mysosDb
       .collection('users')
-      .where('caregiverUids', arrayContains: uid)
+      .where('caringUids', arrayContains: uid)
       .snapshots()
       .map((s) => s.docs.map((d) => Profile.fromDoc(d.id, d.data())).toList());
 });
 
-/// Profiles of the users this caregiver cares for.
+/// Profiles of the users this caregiver cares for (role: caregiver).
+/// A user's profile lists this uid in their `caregiverUids`.
 final caredUsersProvider = StreamProvider<List<Profile>>((ref) {
   final uid = ref.watch(authUidProvider).valueOrNull;
   if (uid == null) return Stream.value(const []);
   return mysosDb
       .collection('users')
-      .where('caringUids', arrayContains: uid)
+      .where('caregiverUids', arrayContains: uid)
       .snapshots()
       .map((s) => s.docs.map((d) => Profile.fromDoc(d.id, d.data())).toList());
 });

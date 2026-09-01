@@ -48,8 +48,8 @@ export async function sendSms(
 }
 
 /** Build the SMS body — kept short so a Thai message stays within one 70-char segment when possible. */
-export function buildSosSmsBody(userName: string, mapUrl: string | null): string {
-  const base = `SOS! ${userName} ขอความช่วยเหลือ`;
+export function buildSosSmsBody(userName: string, timeText: string, mapUrl: string | null): string {
+  const base = `SOS! ${userName} ขอความช่วยเหลือ (${timeText}น.)`;
   if (!mapUrl) return `${base} ด่วน!`;
   return `${base} ${mapUrl}`;
 }

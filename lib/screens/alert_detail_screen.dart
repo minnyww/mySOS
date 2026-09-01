@@ -128,7 +128,17 @@ class _Body extends ConsumerWidget {
           OutlinedButton.icon(
             icon: const Icon(Icons.close),
             label: const Text('ยกเลิกการขอความช่วยเหลือ'),
-            onPressed: () => ref.read(alertServiceProvider).cancelAlert(alert.id),
+            onPressed: () async {
+              try {
+                await ref.read(alertServiceProvider).cancelAlert(alert.id);
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('ยกเลิกไม่สำเร็จ: $e')),
+                  );
+                }
+              }
+            },
           ),
 
         const SizedBox(height: 24),

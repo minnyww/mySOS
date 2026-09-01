@@ -67,19 +67,18 @@ async function handleEvent(event: LineEvent, token: string): Promise<void> {
       return;
     }
     const code = match[1];
-    const snap = await db
-      .collection('users')
-      .where('lineLinkCode', '==', code)
-      .where('lineLinkExpiresAt', '>', Date.now())
-      .limit(1)
-      .get();
+    // Equality-only query: adding a range filter on lineLinkExpiresAt would
+    // require a composite index that Firestore does not create automatically.
+    const snap = await db.collection('users').where('lineLinkCode', '==', code).get();
+    const doc = snap.docs.find((d) => {
+      const expiresAt = d.data().lineLinkExpiresAt;
+      return typeof expiresAt === 'number' && expiresAt > Date.now();
+    });
 
-    if (snap.empty) {
+    if (!doc) {
       await lineReply(replyToken, token, 'รหัสไม่ถูกต้องหรือหมดอายุ กรุณาสร้างรหัสใหม่ในแอป MySOS แล้วส่งมาอีกครั้ง');
       return;
     }
-
-    const doc = snap.docs[0];
     await doc.ref.update({
       lineUserId,
       lineLinkCode: FieldValue.delete(),

@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import 'config.dart';
+
 enum Role { user, caregiver }
 
 Role? roleFromString(String? s) =>
@@ -58,6 +60,23 @@ class Profile {
   }
 }
 
+/// One point of the live-location trail written while an SOS is active.
+class TrailPoint {
+  const TrailPoint({required this.lat, required this.lng, required this.ts});
+  final double lat;
+  final double lng;
+  final int ts;
+
+  static TrailPoint? fromData(Object? o) {
+    if (o is! Map<String, dynamic>) return null;
+    final lat = o['lat'];
+    final lng = o['lng'];
+    final ts = o['ts'];
+    if (lat is! double || lng is! double || ts is! int) return null;
+    return TrailPoint(lat: lat, lng: lng, ts: ts);
+  }
+}
+
 /// status: active | acked | cancelled | rate_limited | no_caregivers | failed
 class AlertRecord {
   const AlertRecord({
@@ -72,6 +91,8 @@ class AlertRecord {
     this.ackBy,
     this.ackByName,
     this.ackAt,
+    this.locationUpdatedAt,
+    this.trail = const [],
     this.caregiverUids = const [],
     this.channels = const {},
   });
@@ -87,11 +108,19 @@ class AlertRecord {
   final String? ackBy;
   final String? ackByName;
   final int? ackAt;
+  final int? locationUpdatedAt;
+  final List<TrailPoint> trail;
   final List<String> caregiverUids;
   final Map<String, dynamic> channels;
 
   bool get isActive => status == 'active';
   bool get hasLocation => lat != null && lng != null;
+
+  /// End of the 10-minute live-sharing window, in ms since epoch.
+  int get liveUntil => ts + AppConfig.liveLocationWindow.inMilliseconds;
+
+  bool get isWithinLiveWindow =>
+      DateTime.now().millisecondsSinceEpoch < liveUntil;
 
   String get statusLabel {
     switch (status) {
@@ -130,6 +159,11 @@ class AlertRecord {
       ackBy: data['ackBy'] as String?,
       ackByName: data['ackByName'] as String?,
       ackAt: data['ackAt'] as int?,
+      locationUpdatedAt: data['locationUpdatedAt'] as int?,
+      trail: (data['locationHistory'] as List<dynamic>? ?? const [])
+          .map(TrailPoint.fromData)
+          .whereType<TrailPoint>()
+          .toList(),
       caregiverUids: (data['caregiverUids'] as List<dynamic>? ?? const [])
           .map((e) => e.toString())
           .toList(),

@@ -64,6 +64,9 @@ export async function onPairAcceptedHandler(
       tokens,
       notification: { title, body },
       data: { type: 'pair_linked' },
+      android: {
+        notification: { icon: 'ic_notification', channelId: 'sos_alerts' },
+      },
     });
   };
 
