@@ -12,9 +12,9 @@
 import * as admin from 'firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import type { MulticastMessage } from 'firebase-admin/messaging';
-import { lineChannelToken, boostSmsApiKey, boostSmsSenderName } from './config';
+import { lineChannelToken, twilioAccountSid, twilioAuthToken, twilioFrom } from './config';
 import { linePush, buildSosMessage } from './line';
-import { sendSms, normalizeThaiPhone, buildSosSmsBody } from './boostsms';
+import { sendSms, normalizeThaiPhone, buildSosSmsBody } from './twilio';
 import { db } from './admin';
 
 /** Minimum gap between two fanned-out SOS alerts from the same user. */
@@ -185,14 +185,15 @@ async function fanOutAlert(alertId: string, raw: admin.firestore.QueryDocumentSn
     channels.line = { error: (err as Error).message.slice(0, 200) };
   }
 
-  // ---- Channel 3: SMS via BoostSMS ----------------------------------------
+  // ---- Channel 3: SMS via Twilio ------------------------------------------
   try {
-    const apiKey = boostSmsApiKey.value();
-    const senderName = boostSmsSenderName.value();
+    const accountSid = twilioAccountSid.value();
+    const authToken = twilioAuthToken.value();
+    const from = twilioFrom.value();
     const targets = caregivers
       .map((c) => ({ uid: c.uid, phone: c.data.phone ? normalizeThaiPhone(c.data.phone) : null }))
       .filter((t): t is { uid: string; phone: string } => t.phone !== null);
-    if (!apiKey) {
+    if (!accountSid || !authToken || !from) {
       channels.sms = { skipped: 'not-configured' };
     } else if (targets.length === 0) {
       channels.sms = { skipped: 'no-valid-phone-numbers' };
@@ -201,7 +202,7 @@ async function fanOutAlert(alertId: string, raw: admin.firestore.QueryDocumentSn
       let sent = 0;
       const errors: string[] = [];
       for (const t of targets) {
-        const result = await sendSms(apiKey, t.phone, body, senderName);
+        const result = await sendSms(accountSid, authToken, from, t.phone, body);
         if (result.ok) sent++;
         else errors.push(`uid=${t.uid}: ${result.error}`);
       }

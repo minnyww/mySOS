@@ -37,6 +37,8 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>NSCameraUsageDescription</key>
 	<string>MySOS ต้องใช้กล้องเพื่อสแกน QR code เชื่อมต่อกับผู้ดูแล</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>MySOS ใช้ตำแหน่งของคุณเพื่อส่งพิกัดให้ผู้ดูแลเมื่อกด SOS และแชร์ตำแหน่งสดระหว่างเหตุฉุกเฉิน</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>LSRequiresIPhoneOS</key>

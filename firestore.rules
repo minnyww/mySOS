@@ -124,6 +124,26 @@ service cloud.firestore {
     }
 
     // ---------------- alerts ----------------
+    function validLocation(loc) {
+      return loc is map
+        && loc.keys().hasOnly(['lat', 'lng'])
+        && loc.lat is number
+        && loc.lng is number
+        && loc.lat >= -90
+        && loc.lat <= 90
+        && loc.lng >= -180
+        && loc.lng <= 180;
+    }
+
+    function validTrailPoint(p) {
+      return p.keys().hasOnly(['lat', 'lng', 'ts'])
+        && p.lat is number
+        && p.lng is number
+        && p.ts is number
+        && p.lat >= -90 && p.lat <= 90
+        && p.lng >= -180 && p.lng <= 180;
+    }
+
     match /alerts/{alertId} {
       function isOwnerOf(data) {
         return signedIn() && data.userId == request.auth.uid;
@@ -152,18 +172,16 @@ service cloud.firestore {
         && request.resource.data.ts is number
         && request.resource.data.caregiverUids is list
         && request.resource.data.caregiverUids == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.caregiverUids
-        && (!('location' in request.resource.data)
-            || (request.resource.data.location.keys().hasOnly(['lat', 'lng'])
-                && request.resource.data.location.lat is number
-                && request.resource.data.location.lng is number
-                && request.resource.data.location.lat >= -90
-                && request.resource.data.location.lat <= 90
-                && request.resource.data.location.lng >= -180
-                && request.resource.data.location.lng <= 180));
+          && (!('location' in request.resource.data)
+              || validLocation(request.resource.data.location));
 
       // Acknowledge (caregiver) or cancel (owner) — no other edits by clients.
       // Owner may also cancel a rate-limited / no-caregivers alert (the status
       // can flip server-side between render and press).
+      //
+      // Live location: while the alert is active and younger than 10 minutes,
+      // the owner's app may update the current fix, append trail points
+      // (bounded, grow-only) and stamp the update time. Nothing else changes.
       allow update: if resource.data.status in ['active', 'rate_limited', 'no_caregivers']
         && ((isCaregiverOf(resource.data)
               && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'ackBy', 'ackByName', 'ackAt'])
@@ -174,7 +192,27 @@ service cloud.firestore {
               && request.resource.data.ackAt is number)
           || (isOwnerOf(resource.data)
               && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
-              && request.resource.data.status == 'cancelled'));
+              && request.resource.data.status == 'cancelled')
+          || (isOwnerOf(resource.data)
+              && resource.data.status == 'active'
+              && request.resource.data.diff(resource.data).affectedKeys()
+                   .hasOnly(['location', 'locationHistory', 'locationUpdatedAt'])
+              && validLocation(request.resource.data.location)
+              && request.resource.data.locationUpdatedAt is number
+              && request.resource.data.locationUpdatedAt > request.time.toMillis() - 60000
+              && request.resource.data.locationUpdatedAt <= request.time.toMillis() + 60000
+              && request.time.toMillis() - resource.data.ts <= 600000
+              // Rules have no list comprehension, so only the appended point
+              // is validated; growth is pinned to exactly +1 per write.
+              && request.resource.data.locationHistory is list
+              && request.resource.data.locationHistory.size() > 0
+              && request.resource.data.locationHistory.size() <= 120
+              && request.resource.data.locationHistory.size()
+                   == ('locationHistory' in resource.data
+                        ? resource.data.locationHistory.size() + 1 : 1)
+              && validTrailPoint(
+                   request.resource.data.locationHistory[
+                     request.resource.data.locationHistory.size() - 1])));
 
       allow delete: if false;
     }

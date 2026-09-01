@@ -8,6 +8,7 @@ import '../config.dart';
 import '../models.dart';
 import '../state/providers.dart';
 import '../theme.dart';
+import '../widgets/alert_map.dart';
 import '../widgets/channel_result.dart';
 
 /// SOS flow: 3-2-1 countdown (cancellable) -> send -> live delivery status.
@@ -63,9 +64,12 @@ class _SosScreenState extends ConsumerState<SosScreen> {
     try {
       final doc =
           await ref.read(alertServiceProvider).sendSos(profile: profile, source: widget.source);
+      final record = AlertRecord.fromSnapshot(doc);
+      // Share live GPS with caregivers while this alert stays active (≤10 min).
+      ref.read(liveTrackerProvider).start(alertId: record.id, alertTs: record.ts);
       setState(() {
         _phase = _Phase.sent;
-        _alertId = doc.id;
+        _alertId = record.id;
       });
     } catch (e) {
       setState(() => _error = 'ส่งไม่สำเร็จ: $e');
@@ -179,6 +183,8 @@ class _SentView extends ConsumerWidget {
           style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: 24),
+        if (record != null) LiveShareChip(alert: record),
+        const SizedBox(height: 12),
         ChannelResult(alert: record),
         const SizedBox(height: 32),
         if (record?.isActive ?? false)

@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../models.dart';
 import '../state/providers.dart';
 import '../theme.dart';
+import '../widgets/alert_map.dart';
 import '../widgets/channel_result.dart';
 import '../widgets/status_chip.dart';
 
@@ -86,9 +87,15 @@ class _Body extends ConsumerWidget {
         ),
         const SizedBox(height: 16),
 
+        // --- In-app live map ------------------------------------------------
+        if (alert.hasLocation) ...[
+          AlertMapCard(alert: alert),
+          const SizedBox(height: 8),
+        ],
+
         // --- Actions ------------------------------------------------------
         if (alert.hasLocation)
-          FilledButton.icon(
+          OutlinedButton.icon(
             icon: const Icon(Icons.map),
             label: const Text('เปิดตำแหน่งใน Google Maps'),
             onPressed: () => launchUrl(

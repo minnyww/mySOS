@@ -8,7 +8,7 @@
 |---|---|---|
 | 🔔 Push (FCM) | ผู้ดูแลติดตั้งแอป | ฟรี |
 | 💬 LINE OA | ผู้ดูแลเพิ่มเพื่อน OA + เชื่อมรหัส | ฟรี (แพ็กเกจ OA ฟรี) |
-| 📱 SMS (BoostSMS) | กรอกเบอร์โทรผู้ดูแล + ใส่ API key | เครดิต BoostSMS (ทดลองฟรี 100 ข้อความ) |
+| 📱 SMS (Twilio) | กรอกเบอร์โทรผู้ดูแล + ตั้งค่า Twilio | คิดค่าบริการตามการใช้งาน |
 
 พร้อมพิกัด GPS ในแจ้งเตือน (ขอสิทธิ์ตอนกด SOS ครั้งแรก ปฏิเสธได้ แจ้งเตือนยังส่งได้)
 
@@ -38,7 +38,7 @@ mysos/
 │     ├─ pairing.ts        #   จับคู่ QR/รหัส
 │     ├─ lineWebhook.ts    #   LINE Messaging API webhook
 │     ├─ line.ts           #   ส่งข้อความ LINE
-│     └─ boostsms.ts       #   ส่ง SMS ผ่าน BoostSMS API
+│     └─ twilio.ts         #   ส่ง SMS ผ่าน Twilio API
 ├─ firestore.rules         # Security Rules (เข้มงวด)
 └─ firebase.json
 ```
@@ -65,7 +65,7 @@ mysos/
 
 ### 1) โปรเจกต์ Firebase
 
-1. สร้างโปรเจกต์ที่ https://console.firebase.google.com (แชร์แผน **Blaze** จำเป็นสำหรับ Cloud Functions ที่เรียก LINE/BoostSMS — มีโควตาฟรีในตัว ไม่มีค่าใช้จ่ายจนกว่าจะเกินโควตา)
+1. สร้างโปรเจกต์ที่ https://console.firebase.google.com (แชร์แผน **Blaze** จำเป็นสำหรับ Cloud Functions ที่เรียก LINE/Twilio — มีโควตาฟรีในตัว ไม่มีค่าใช้จ่ายจนกว่าจะเกินโควตา)
 2. **Authentication** → Sign-in method → เปิด **Anonymous**
 3. **Firestore Database** → สร้าง database (โหมด production)
 4. เชื่อมแอป:
@@ -99,14 +99,16 @@ mysos/
 4. หา URL เพิ่มเพื่อน (`https://line.me/R/ti/p/@xxxx`) มาใส่ที่ `lib/config.dart` → `lineOaUrl`
 5. หลัง deploy functions (ข้อ 5) กลับมาตั้ง Webhook URL = ลิงก์ function `lineWebhook`
 
-### 4) BoostSMS (SMS)
+### 4) Twilio (SMS)
 
-1. สมัคร https://app.boost-sms.com/register (เครดิตทดลอง 100 ข้อความ)
-2. Dashboard → API → สร้าง **API Key**
-3. วางคีย์ใน `functions/.env`
-4. หมายเหตุ: SMS ภาษาไทยจำกัด ~70 ตัวอักษรต่อเซกเมนต์ — ข้อความ SOS ของเราสั้นและมีลิงก์แผนที่ (ยาวเกิน 70 จะถูกนับเป็น 2 เซกเมนต์ ตามราคาปกติของผู้ให้บริการ)
+1. สมัครบัญชีที่ https://www.twilio.com/try-twilio
+2. Console → Account Info → คัดลอก **Account SID** และ **Auth Token**
+3. ซื้อ/เลือกหมายเลขโทรศัพท์ Twilio ที่ส่ง SMS ได้ แล้วใช้เป็น **From** ในรูปแบบ E.164 (เช่น `+15551234567`)
+4. วางค่า `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM` ใน `functions/.env`
+5. หมายเหตุ: SMS ภาษาไทยจำกัด ~70 ตัวอักษรต่อเซกเมนต์ — ข้อความ SOS ของเราสั้นและมีลิงก์แผนที่ (ยาวเกิน 70 จะถูกนับเป็น 2 เซกเมนต์ ตามราคาปกติของผู้ให้บริการ)
+6. บัญชี Trial ส่งได้เฉพาะหมายเลขปลายทางที่ยืนยันแล้ว และ Twilio อาจต้องเปิดสิทธิ์ส่งไปไทยตามภูมิภาค/บัญชี
 
-> ไม่ใส่คีย์ก็ได้ — ระบบจะข้ามช่องทาง SMS เองโดยไม่พัง
+> ตั้งค่าไม่ครบ ระบบข้ามช่องทาง SMS เองโดยไม่พัง
 
 ### 5) Environment ของ Functions
 
@@ -169,7 +171,7 @@ firebase deploy --only functions,firestore:rules,firestore:indexes
   - แก้รายชื่อผู้ดูแล/ผู้ใช้ที่เชื่อมกัน ได้เฉพาะจาก Cloud Functions เท่านั้น
   - รหัสจับคู่ใช้ได้ครั้งเดียว หมดอายุ 10 นาที และอีกฝ่ายเขียนได้แค่ uid ของตัวเอง
   - อ่าน alert ได้เฉพาะเจ้าของและผู้ดูแลที่เชื่อมอยู่เท่านั้น
-- แจ้งเตือนทุกช่องทางยิงจาก **เซิร์ฟเวอร์เท่านั้น** (client ไม่มี token LINE/BoostSMS)
+- แจ้งเตือนทุกช่องทางยิงจาก **เซิร์ฟเวอร์เท่านั้น** (client ไม่มี token LINE/Twilio)
 
 ## 🗄️ โครงสร้างบน Firebase (chayen-2)
 
@@ -179,7 +181,7 @@ firebase deploy --only functions,firestore:rules,firestore:indexes
 - Cloud Functions ทุกตัวอยู่ region `asia-southeast1` และ trigger ผูกกับ `mysosdb`
 - LINE Webhook URL ที่ต้องตั้งใน LINE Developers Console:
   `https://asia-southeast1-chayen-2.cloudfunctions.net/lineWebhook`
-- ตัวแปรแวดล้อม (LINE/BoostSMS keys) อยู่ใน `functions/.env` (ไม่ถูก commit) —
+- ตัวแปรแวดล้อม (LINE/Twilio credentials) อยู่ใน `functions/.env` (ไม่ถูก commit) —
   ตั้งค่าแล้ว deploy ใหม่เสมอ: `firebase deploy --only functions`
 - ทดสอบ backend end-to-end ด้วย emulator:
   ```bash
