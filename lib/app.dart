@@ -33,7 +33,9 @@ final routerProvider = Provider<GoRouter>((ref) {
   final refresh = _RouterRefresh();
   ref.listen(firebaseBootProvider, (_, __) => refresh.ping());
   ref.listen(authUidProvider, (_, __) => refresh.ping());
-  ref.listen(userProfileProvider, (_, __) => refresh.ping());
+  ref.listen(userProfileProvider, (prev, next) {
+    refresh.ping();
+  });
   ref.listen(notificationTapProvider, (_, __) => refresh.ping());
 
   final router = GoRouter(
@@ -67,7 +69,8 @@ final routerProvider = Provider<GoRouter>((ref) {
         return loc == '/splash' ? null : '/splash';
       }
 
-      final profile = ref.read(userProfileProvider).valueOrNull;
+      final profileAsync = ref.read(userProfileProvider);
+      final profile = profileAsync.valueOrNull;
 
       // A tapped SOS notification always wins.
       final tapped = ref.read(notificationTapProvider);
@@ -79,6 +82,29 @@ final routerProvider = Provider<GoRouter>((ref) {
       }
 
       if (profile == null || profile.role == null) {
+        // Same race one step later: auth resolved but the profile doc is
+        // still loading. Stash the intent here too — the mysos:// URI never
+        // comes back as a location, so dropping it here means a widget tap
+        // silently lands on the home screen. A held /fire parks on splash
+        // (an SOS must not flash the onboarding UI); a held /pair lets
+        // onboarding proceed and replays once the profile exists.
+        //
+        // When the stream has already settled with no doc for this uid, the
+        // user simply has no profile yet: let onboarding run, and drop a
+        // held /fire — it must not auto-fire an SOS the moment setup
+        // completes.
+        final noProfile =
+            !profileAsync.isLoading && profileAsync.hasValue && profile == null;
+        if (!noProfile && (loc == '/fire' || loc.startsWith('/pair/'))) {
+          ref.read(pendingDeepLinkProvider.notifier).state = loc;
+        }
+        if (noProfile && loc == '/fire') {
+          ref.read(pendingDeepLinkProvider.notifier).state = null;
+        }
+        if (!noProfile &&
+            (loc == '/fire' || ref.read(pendingDeepLinkProvider) == '/fire')) {
+          return loc == '/splash' ? null : '/splash';
+        }
         return (loc == '/welcome' || loc == '/profile-setup') ? null : '/welcome';
       }
 

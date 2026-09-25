@@ -46,8 +46,8 @@ Future<BootstrapResult> bootstrapFirebase() async {
 bool get _useEmulators {
   if (kDebugMode) {
     final env = Platform.environment;
-    if (env['USE_FIREBASE_EMULATORS'] == 'true') return true;
-    if (const bool.fromEnvironment('USE_FIREBASE_EMULATORS')) return true;
+    if (env['USE_FIRESTORE_EMULATORS'] == 'true') return true;
+    if (const bool.fromEnvironment('USE_FIRESTORE_EMULATORS')) return true;
   }
   return false;
 }

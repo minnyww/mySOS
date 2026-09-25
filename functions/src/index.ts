@@ -15,12 +15,17 @@ const BASE = {
   database: 'mysosdb',
 } as const;
 
-export const onAlertCreated = onDocumentCreated(
+// The Firebase project chayen-2 is shared with other apps that deploy their
+// own functions (e.g. an `api` HTTPS function), and a full `firebase deploy`
+// from those apps deletes anything not in their source — which wiped the
+// previous unprefixed names. Every function is therefore namespaced `mysos*`
+// so its path can never collide with another project's.
+export const mysosOnAlertCreated = onDocumentCreated(
   { ...BASE, document: 'alerts/{alertId}' },
   (event) => onAlertCreatedHandler(event.params.alertId, event.data),
 );
 
-export const onAlertUpdated = onDocumentUpdated(
+export const mysosOnAlertUpdated = onDocumentUpdated(
   { ...BASE, document: 'alerts/{alertId}' },
   (event) => {
     if (!event.data) return;
@@ -28,7 +33,7 @@ export const onAlertUpdated = onDocumentUpdated(
   },
 );
 
-export const onPairAccepted = onDocumentUpdated(
+export const mysosOnPairAccepted = onDocumentUpdated(
   { ...BASE, document: 'pairs/{code}' },
   (event) => {
     if (!event.data) return;
@@ -36,4 +41,4 @@ export const onPairAccepted = onDocumentUpdated(
   },
 );
 
-export const lineWebhook = onRequest({ region: 'asia-southeast1' }, lineWebhookHandler);
+export const mysosLineWebhook = onRequest({ region: 'asia-southeast1' }, lineWebhookHandler);

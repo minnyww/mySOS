@@ -10,7 +10,7 @@ import android.widget.RemoteViews
 
 /**
  * Home-screen SOS button. Tapping opens the app straight into the SOS flow
- * via the `mysos://fire` deep link (auto-countdown, cancellable).
+ * via the `mysos://fire` deep link — sent immediately, no countdown.
  */
 class SosWidgetProvider : AppWidgetProvider() {
 

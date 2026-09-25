@@ -7,11 +7,14 @@ import 'package:go_router/go_router.dart';
 import '../config.dart';
 import '../models.dart';
 import '../state/providers.dart';
+import '../services/location_service.dart';
 import '../theme.dart';
 import '../widgets/alert_map.dart';
 import '../widgets/channel_result.dart';
 
 /// SOS flow: 3-2-1 countdown (cancellable) -> send -> live delivery status.
+/// GPS warms up in parallel with the countdown so the alert can carry a fix
+/// without delaying the send.
 class SosScreen extends ConsumerStatefulWidget {
   const SosScreen({super.key, required this.source});
   final String source; // 'app' | 'widget'
@@ -26,12 +29,14 @@ class _SosScreenState extends ConsumerState<SosScreen> {
   _Phase _phase = _Phase.countdown;
   int _count = AppConfig.sosCountdown.inSeconds;
   Timer? _timer;
+  late final Future<GpsPosition?> _locationFuture;
   String? _alertId;
   String? _error;
 
   @override
   void initState() {
     super.initState();
+    _locationFuture = getCurrentPosition();
     _timer = Timer.periodic(const Duration(seconds: 1), (t) {
       if (_count <= 1) {
         t.cancel();
@@ -55,6 +60,7 @@ class _SosScreenState extends ConsumerState<SosScreen> {
   }
 
   Future<void> _fire() async {
+    if (!mounted) return;
     setState(() => _phase = _Phase.sending);
     final profile = ref.read(userProfileProvider).valueOrNull;
     if (profile == null) {
@@ -62,16 +68,28 @@ class _SosScreenState extends ConsumerState<SosScreen> {
       return;
     }
     try {
-      final doc =
-          await ref.read(alertServiceProvider).sendSos(profile: profile, source: widget.source);
+      // Hard cap: a cold GPS (or a permission dialog) must not hold the SOS
+      // hostage — send without a fix and let the live tracker fill it in.
+      GpsPosition? location;
+      try {
+        location = await _locationFuture
+            .timeout(const Duration(seconds: 2), onTimeout: () => null);
+      } catch (_) {}
+      final doc = await ref.read(alertServiceProvider).sendSos(
+            profile: profile,
+            source: widget.source,
+            location: location,
+          );
       final record = AlertRecord.fromSnapshot(doc);
       // Share live GPS with caregivers while this alert stays active (≤10 min).
       ref.read(liveTrackerProvider).start(alertId: record.id, alertTs: record.ts);
+      if (!mounted) return; // user backed out mid-send — tracking still runs
       setState(() {
         _phase = _Phase.sent;
         _alertId = record.id;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() => _error = 'ส่งไม่สำเร็จ: $e');
     }
   }

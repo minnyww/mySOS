@@ -1,5 +1,6 @@
-import 'db.dart';
 import 'dart:math' as math;
+
+import 'db.dart';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
@@ -37,15 +38,14 @@ class AlertService {
   CollectionReference<Map<String, dynamic>> get _alerts =>
       _db.collection('alerts');
 
-  /// Create an SOS alert. Location is fetched best-effort in parallel with
-  /// a short timeout so it never delays the alert by much.
+  /// Create an SOS alert. [location] is an already-resolved (possibly null)
+  /// GPS fix — the SOS screen warms one up during its countdown and hands it
+  /// over here; the write itself never waits on GPS.
   Future<DocumentSnapshot<Map<String, dynamic>>> sendSos({
     required Profile profile,
     required String source,
+    required GpsPosition? location,
   }) async {
-    // Fetch location while we prepare the document — do not await alone.
-    final locationFuture = getCurrentPosition();
-
     final data = <String, dynamic>{
       'userId': profile.uid,
       'userName': profile.displayName ?? 'ผู้ใช้',
@@ -54,8 +54,6 @@ class AlertService {
       'ts': DateTime.now().millisecondsSinceEpoch,
       'caregiverUids': profile.caregiverUids,
     };
-
-    final location = await locationFuture;
     if (location != null) {
       data['location'] = {'lat': location.lat, 'lng': location.lng};
     }
